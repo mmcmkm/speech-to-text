@@ -7,7 +7,13 @@ import ctypes
 
 # Windowsでコンソールウィンドウを非表示にする
 if sys.platform == "win32":
-    ctypes.windll.user32.ShowWindow(ctypes.windll.kernel32.GetConsoleWindow(), 0)
+    # バッチファイルから起動した場合にも確実に非表示にする
+    try:
+        hwnd = ctypes.windll.kernel32.GetConsoleWindow()
+        if hwnd != 0:
+            ctypes.windll.user32.ShowWindow(hwnd, 0)
+    except Exception as e:
+        print(f"コンソールウィンドウの非表示に失敗: {e}")
 
 # 自作モジュールのインポート
 from services.recorder import AudioRecorder

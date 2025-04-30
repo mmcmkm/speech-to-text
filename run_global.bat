@@ -20,11 +20,11 @@ if "%GEMINI_API_KEY%"=="" (
     exit /b 1
 )
 
-pythonw "%APP_ROOT%main.py"
-if %errorlevel% neq 0 (
+start "" /b pythonw "%APP_ROOT%main.py"
+if exist "%APP_ROOT%main.py" (
+    exit /b 0
+) else (
     echo Application failed to start
     pause
     exit /b 1
-)
-
-exit /b 0 
+) 
