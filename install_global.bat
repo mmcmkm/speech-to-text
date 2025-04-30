@@ -1,11 +1,16 @@
 @echo off
-REM UTF-8コードページを設定（BOM付き）
-chcp 65001 > nul
-echo 必要なパッケージをインストールしています...
+chcp 65001
+setlocal enabledelayedexpansion
 
-REM 必要なパッケージのインストール
+echo Installing required packages...
+
+cd /d "%~dp0"
+REM 実行ディレクトリに移動してからrequirements.txtを使用
 pip install -r requirements.txt
-pip install pywin32
+if errorlevel 1 (
+    echo Error occurred during installation.
+) else (
+    echo Installation completed successfully.
+)
 
-echo インストールが完了しました。
 pause 

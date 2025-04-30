@@ -1,5 +1,6 @@
 import os
-import google.generativeai as genai
+import google.genai as genai
+from google.genai import types
 import base64
 import logging
 from utils.logger import Logger
@@ -7,10 +8,12 @@ from utils.logger import Logger
 class TranscriptionService:
     # 利用可能なモデルのリスト（無料枠対応）
     AVAILABLE_MODELS = {
-        'gemini-2.0-pro': '高精度な文字起こしに適した安定版モデル',
+        'gemini-2.5-pro-exp-03-25': '高精度な文字起こしに適した最新モデル（無料枠対応）',
+        'gemini-2.5-flash-preview-04-17': '高速な文字起こしに適した最新モデル',
         'gemini-2.0-flash': '高速な文字起こしに適した安定版モデル',
-        'gemini-1.5-pro': '安定した性能を提供する従来モデル',
-        'gemini-1.5-flash': '高速処理に特化した従来モデル'
+        'gemini-1.5-pro': '高精度な文字起こしに適した従来モデル',
+        'gemini-1.5-flash': '高速な文字起こしに適した従来モデル',
+        'gemini-1.5-flash-8b': '軽量で高速な文字起こしに適した従来モデル'
     }
 
     # 文字起こしモードの定義
@@ -50,7 +53,7 @@ class TranscriptionService:
         }
     }
 
-    def __init__(self, model_name='gemini-2.0-pro', mode='clean'):
+    def __init__(self, model_name='gemini-2.5-pro-exp-03-25', mode='clean'):
         """文字起こしサービスの初期化
 
         Args:
@@ -67,7 +70,7 @@ class TranscriptionService:
         
         # Gemini APIの設定
         self.logger.info("Gemini APIの初期化を開始します")
-        genai.configure(api_key=api_key)
+        self.client = genai.Client(api_key=api_key)  # クライアントの初期化
         self.set_model(model_name)
         self.set_mode(mode)
         self.logger.info("Gemini APIの初期化が完了しました")
@@ -87,7 +90,6 @@ class TranscriptionService:
             raise ValueError(error_msg)
         
         self.model_name = model_name
-        self.model = genai.GenerativeModel(model_name)
         self.logger.info(f"モデルを '{model_name}' に設定しました")
     
     def set_mode(self, mode):
@@ -172,24 +174,38 @@ class TranscriptionService:
         # 音声データとプロンプトを送信
         self.logger.info("Gemini APIにリクエストを送信しています...")
         try:
-            response = self.model.generate_content([
-                prompt,
-                {
-                    "mime_type": mime_type,
-                    "data": audio_base64
-                }
-            ])
-            self.logger.debug(f"APIレスポンス: {response.text}")
+            model = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[
+                    prompt,
+                    types.Part(
+                        inline_data=types.Blob(
+                            mime_type=mime_type,
+                            data=audio_base64
+                        )
+                    )
+                ]
+            )
+            self.logger.debug(f"APIレスポンス: {model.text}")
         except Exception as e:
-            error_msg = f"Gemini APIの呼び出し中にエラーが発生しました: {str(e)}"
+            error_msg = str(e)
+            if "503" in error_msg and "overloaded" in error_msg:
+                error_msg = "Gemini APIのサーバーが混雑しています。しばらく時間をおいて再度お試しください。"
+            elif "429" in error_msg:
+                error_msg = "APIの利用制限に達しました。しばらく時間をおいて再度お試しください。"
+            elif "401" in error_msg:
+                error_msg = "APIキーが無効です。APIキーの設定を確認してください。"
+            else:
+                error_msg = f"文字起こし中にエラーが発生しました: {str(e)}"
+            
             self.logger.error(error_msg, exc_info=True)
-            raise
+            return error_msg
         
         # レスポンスからテキストを抽出
-        if response.text:
+        if model.text:
             self.logger.info("文字起こしが正常に完了しました")
             # テキストのクリーンアップを実行
-            cleaned_text = self.cleanup_text(response.text.strip())
+            cleaned_text = self.cleanup_text(model.text.strip())
             return cleaned_text
         else:
             error_msg = "文字起こしに失敗しました。レスポンスが空です。"

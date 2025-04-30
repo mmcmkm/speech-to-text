@@ -1,23 +1,30 @@
 @echo off
-chcp 65001 > nul
-echo 音声文字起こしツールを起動しています...
+chcp 65001
+setlocal EnableDelayedExpansion
 
-REM 作業ディレクトリの設定
-set "SCRIPT_DIR=%~dp0"
-cd /d "%SCRIPT_DIR%"
+set "APP_ROOT=%~dp0"
+cd /d "%APP_ROOT%"
 
-REM 環境変数が設定されているか確認
-if "%GEMINI_API_KEY%"=="" (
-    echo エラー: GEMINI_API_KEYが設定されていません
-    echo 先に環境変数を設定してください
+if not exist "logs" mkdir logs
+
+python --version > nul 2>&1
+if %errorlevel% neq 0 (
+    echo Python is not installed or not in PATH
     pause
     exit /b 1
 )
 
-REM アプリケーション実行
-python main.py
-if errorlevel 1 (
-    echo エラー: アプリケーションの実行に失敗しました
+if "%GEMINI_API_KEY%"=="" (
+    echo GEMINI_API_KEY environment variable is not set
     pause
     exit /b 1
-) 
+)
+
+pythonw "%APP_ROOT%main.py"
+if %errorlevel% neq 0 (
+    echo Application failed to start
+    pause
+    exit /b 1
+)
+
+exit /b 0 

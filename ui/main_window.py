@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QTextEdit, QLabel, QMessageBox, QApplication,
     QSpinBox, QDoubleSpinBox, QCheckBox, QGroupBox, QFormLayout, QProgressBar,
-    QComboBox
+    QComboBox, QStatusBar
 )
 from PySide6.QtCore import Qt, QTimer, Signal, Slot
 import threading
@@ -14,6 +14,7 @@ class MainWindow(QMainWindow):
     transcription_complete = Signal(str)
     recording_status_changed = Signal(bool)
     silence_detected = Signal()
+    status_changed = Signal(str)  # ステータス変更用のシグナル
     
     def __init__(self, recorder, transcription_service, clipboard_module):
         """メインウィンドウの初期化
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
         self.recording_thread = None
         self.transcription_thread = None
         self.is_recording = False
+        self.is_processing = False  # 処理中フラグ
         
         # 無音検出用のタイマー
         self.silence_timer = QTimer()
@@ -100,12 +102,20 @@ class MainWindow(QMainWindow):
         if self.settings.get_window_state():
             self.showMaximized()
         
-        # メインウィジェット
+        # メインウィジェットとレイアウト
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
-        
-        # メインレイアウト
         main_layout = QVBoxLayout(main_widget)
+        
+        # ステータスバーの設定
+        self.status_bar = QStatusBar()
+        self.setStatusBar(self.status_bar)
+        self.status_bar.showMessage("準備完了")
+        
+        # プログレスバーの設定
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setVisible(False)
+        self.status_bar.addPermanentWidget(self.progress_bar)
         
         # モデル選択グループ
         model_group = QGroupBox("モデル設定")
@@ -174,24 +184,6 @@ class MainWindow(QMainWindow):
         self.text_edit.setReadOnly(True)
         self.text_edit.setPlaceholderText("ここに文字起こし結果が表示されます")
         main_layout.addWidget(self.text_edit)
-        
-        # プログレスバー
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        main_layout.addWidget(self.progress_bar)
-        
-        # 録音状態表示ラベル
-        self.recording_label = QLabel()
-        self.recording_label.setAlignment(Qt.AlignCenter)
-        self.recording_label.setStyleSheet("""
-            QLabel {
-                color: #f44336;
-                font-size: 14px;
-                font-weight: bold;
-            }
-        """)
-        main_layout.addWidget(self.recording_label)
         
         # ボタンレイアウト
         button_layout = QHBoxLayout()
@@ -262,7 +254,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.copy_button)
     
     def setup_connections(self):
-        """シグナル/スロット接続の設定"""
+        """シグナルとスロットの接続を設定"""
         self.record_button.clicked.connect(self.start_recording)
         self.stop_button.clicked.connect(self.stop_recording)
         self.copy_button.clicked.connect(self.copy_to_clipboard)
@@ -278,6 +270,9 @@ class MainWindow(QMainWindow):
         self.silence_detection_checkbox.stateChanged.connect(self.update_silence_settings)
         self.silence_threshold_spinbox.valueChanged.connect(self.update_silence_settings)
         self.silence_duration_spinbox.valueChanged.connect(self.update_silence_settings)
+        
+        # ステータス変更シグナルの接続
+        self.status_changed.connect(self.update_status)
     
     def change_model(self, index):
         """モデルを変更する
@@ -328,67 +323,64 @@ class MainWindow(QMainWindow):
             self.settings.set("silence_detection", False)
     
     def start_recording(self):
-        """録音開始処理"""
-        if self.is_recording:
-            return
-        
-        # 設定の更新
-        self.update_silence_settings()
-        
-        # 録音開始
-        success = self.recorder.start_recording()
-        if not success:
-            QMessageBox.warning(self, "エラー", "録音を開始できませんでした")
-            return
-        
-        # 録音スレッド開始
-        self.recording_thread = threading.Thread(target=self.recording_worker)
-        self.recording_thread.daemon = True
-        self.recording_thread.start()
-        
-        # 無音検出タイマー開始
-        if self.silence_detection_checkbox.isChecked():
-            self.silence_timer.start(1000)  # 1秒ごとにチェック
-        
-        # UI更新
-        self.recording_status_changed.emit(True)
+        """録音を開始"""
+        if not self.is_recording and not self.is_processing:
+            self.is_recording = True
+            self.recording_status_changed.emit(True)
+            self.status_changed.emit("録音中...")
+            self.record_button.setText("録音停止")
+            self.recording_thread = threading.Thread(target=self.recording_worker)
+            self.recording_thread.start()
     
     def stop_recording(self):
-        """録音停止処理"""
-        if not self.is_recording:
-            return
-        
-        # 無音検出タイマー停止
-        self.silence_timer.stop()
-        
-        # 録音停止
-        audio_file = self.recorder.stop_recording()
-        if not audio_file:
-            QMessageBox.warning(self, "エラー", "録音を停止できませんでした")
-            return
-        
-        # プログレスバーを表示
-        self.progress_bar.setValue(0)
-        self.progress_bar.show()
-        
-        # 文字起こし処理をスレッドで実行
-        self.transcription_thread = threading.Thread(
-            target=self.transcription_worker, 
-            args=(audio_file,)
-        )
-        self.transcription_thread.daemon = True
-        self.transcription_thread.start()
-        
-        # UI更新
-        self.recording_status_changed.emit(False)
+        """録音を停止"""
+        if self.is_recording:
+            self.is_recording = False
+            self.recording_status_changed.emit(False)
+            self.status_changed.emit("処理中...")
+            self.record_button.setText("録音開始")
+            self.progress_bar.setVisible(True)
+            self.progress_bar.setRange(0, 0)  # インディケーターモード
+            
+            # 録音を停止して音声ファイルを取得
+            try:
+                audio_file = self.recorder.stop_recording()
+                if audio_file:
+                    # 文字起こし処理を開始
+                    self.start_transcription(audio_file)
+                else:
+                    self.status_changed.emit("録音ファイルの取得に失敗しました")
+                    self.progress_bar.setVisible(False)
+            except Exception as e:
+                self.status_changed.emit(f"エラー: {str(e)}")
+                self.progress_bar.setVisible(False)
     
     def recording_worker(self):
         """録音ワーカースレッド"""
-        self.is_recording = True
-        
-        while self.is_recording:
-            self.recorder.record_frame()
-            time.sleep(0.01)  # スリープを入れて CPU 使用率を下げる
+        try:
+            # 録音を開始
+            success = self.recorder.start_recording()
+            if not success:
+                self.status_changed.emit("録音を開始できませんでした")
+                self.is_recording = False
+                self.recording_status_changed.emit(False)
+                return
+            
+            # 無音検出タイマー開始
+            if self.silence_detection_checkbox.isChecked():
+                self.silence_timer.start(1000)  # 1秒ごとにチェック
+            
+            # 録音ループ
+            while self.is_recording:
+                self.recorder.record_frame()
+                time.sleep(0.01)  # CPU使用率を下げるためのスリープ
+        except Exception as e:
+            self.status_changed.emit(f"録音中にエラーが発生しました: {str(e)}")
+            self.is_recording = False
+            self.recording_status_changed.emit(False)
+        finally:
+            # 無音検出タイマーを停止
+            self.silence_timer.stop()
     
     def check_silence(self):
         """無音検出のチェック"""
@@ -403,47 +395,59 @@ class MainWindow(QMainWindow):
             QMessageBox.information(self, "無音検出", "一定時間の無音が検出されたため、録音を停止しました。")
     
     def start_transcription(self, audio_file):
-        """文字起こしを開始する"""
-        try:
-            # プログレスバーを表示
-            self.progress_bar.setValue(0)
-            self.progress_bar.show()
-            
-            # 文字起こしスレッドを開始
-            self.transcription_thread = threading.Thread(
-                target=self.transcription_worker,
-                args=(audio_file,)
-            )
-            self.transcription_thread.daemon = True
-            self.transcription_thread.start()
-            
-        except Exception as e:
-            self.progress_bar.hide()
-            QMessageBox.warning(self, "エラー", f"文字起こしの開始に失敗しました: {str(e)}")
+        """文字起こしを開始
+        
+        Args:
+            audio_file (str): 音声ファイルのパス
+        """
+        self.is_processing = True
+        self.status_changed.emit("文字起こし中...")
+        self.progress_bar.setVisible(True)
+        self.progress_bar.setRange(0, 0)  # インディケーターモード
+        
+        self.transcription_thread = threading.Thread(
+            target=self.transcription_worker,
+            args=(audio_file,)
+        )
+        self.transcription_thread.start()
     
     def transcription_worker(self, audio_file):
-        """文字起こしを実行するワーカースレッド"""
+        """文字起こし処理を実行
+        
+        Args:
+            audio_file (str): 音声ファイルのパス
+        """
         try:
-            # 文字起こしを実行
-            text = self.transcription_service.transcribe_audio(audio_file)
-            
-            # メインスレッドでUIを更新
-            self.transcription_complete.emit(text)
-            
+            result = self.transcription_service.transcribe_audio(audio_file)
+            if result.startswith("文字起こし中にエラーが発生しました"):
+                self.status_changed.emit(result)
+                QMessageBox.warning(self, "エラー", result)
+            else:
+                self.transcription_complete.emit(result)
         except Exception as e:
-            self.transcription_complete.emit(f"エラー: {str(e)}")
+            error_msg = str(e)
+            self.status_changed.emit(error_msg)
+            QMessageBox.warning(self, "エラー", error_msg)
         finally:
-            # プログレスバーを非表示
-            self.progress_bar.hide()
+            self.is_processing = False
+            self.progress_bar.setVisible(False)
+            self.status_changed.emit("準備完了")
     
     @Slot(str)
     def update_transcription(self, text):
-        """文字起こし結果を表示する"""
-        self.text_edit.setText(text)
+        """文字起こし結果を更新
         
-        # クリップボードにコピー
-        if not text.startswith("エラー:"):
-            self.copy_to_clipboard()
+        Args:
+            text (str): 文字起こしされたテキスト
+        """
+        self.text_edit.setText(text)
+        self.status_changed.emit("文字起こし完了")
+        
+        # 自動的にクリップボードにコピー
+        if text:
+            success = self.clipboard_module.copy_to_clipboard(text)
+            if success:
+                self.status_changed.emit("クリップボードにコピーしました")
     
     @Slot(bool)
     def update_recording_status(self, is_recording):
@@ -461,24 +465,10 @@ class MainWindow(QMainWindow):
             self.text_edit.clear()
             self.progress_bar.setValue(0)
             self.progress_bar.show()
-            self.recording_label.setText("録音中...")
-            self.recording_label.setStyleSheet("""
-                QLabel {
-                    color: #f44336;
-                    font-size: 14px;
-                    font-weight: bold;
-                    animation: blink 1s infinite;
-                }
-                @keyframes blink {
-                    0% { opacity: 1; }
-                    50% { opacity: 0.5; }
-                    100% { opacity: 1; }
-                }
-            """)
+            self.status_changed.emit("録音中...")
         else:
             self.progress_bar.hide()
-            self.recording_label.clear()
-            self.recording_label.setStyleSheet("")
+            self.status_changed.emit("準備完了")
     
     def copy_to_clipboard(self):
         """テキストをクリップボードにコピー"""
@@ -486,7 +476,7 @@ class MainWindow(QMainWindow):
         if text:
             success = self.clipboard_module.copy_to_clipboard(text)
             if success:
-                QApplication.beep()  # コピー通知音
+                self.status_changed.emit("クリップボードにコピーしました")
     
     def closeEvent(self, event):
         """ウィンドウを閉じる際の処理"""
@@ -518,4 +508,13 @@ class MainWindow(QMainWindow):
             else:
                 QMessageBox.information(self, "一時ファイル削除", "削除する一時ファイルはありませんでした")
         except Exception as e:
-            QMessageBox.warning(self, "エラー", f"一時ファイルの削除に失敗しました: {str(e)}") 
+            QMessageBox.warning(self, "エラー", f"一時ファイルの削除に失敗しました: {str(e)}")
+    
+    @Slot(str)
+    def update_status(self, message):
+        """ステータスメッセージを更新
+        
+        Args:
+            message (str): 表示するメッセージ
+        """
+        self.status_bar.showMessage(message) 
