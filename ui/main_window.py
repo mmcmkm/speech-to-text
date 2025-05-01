@@ -4,9 +4,12 @@ from PySide6.QtWidgets import (
     QSpinBox, QDoubleSpinBox, QCheckBox, QGroupBox, QFormLayout, QProgressBar,
     QComboBox, QStatusBar
 )
-from PySide6.QtCore import Qt, QTimer, Signal, Slot
+from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QSize
+from PySide6.QtGui import QIcon
 import threading
 import time
+import os
+import subprocess
 from utils.settings import Settings
 
 class MainWindow(QMainWindow):
@@ -95,8 +98,9 @@ class MainWindow(QMainWindow):
         
         # ウィンドウの位置とサイズを復元
         pos, size = self.settings.get_window_geometry()
-        self.move(pos)
-        self.resize(size)
+        if isinstance(pos, QPoint) and isinstance(size, QSize):
+            self.move(pos)
+            self.resize(size)
         
         # 最大化状態を復元
         if self.settings.get_window_state():
@@ -246,6 +250,25 @@ class MainWindow(QMainWindow):
         """)
         button_layout.addWidget(self.clear_button)
         
+        # フォルダーを開くボタン
+        self.open_folder_button = QPushButton("📁")
+        self.open_folder_button.setToolTip("一時ファイルフォルダーを開く")
+        self.open_folder_button.setFixedWidth(40)  # 幅を小さく設定
+        self.open_folder_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #0b7dda;
+            }
+        """)
+        button_layout.addWidget(self.open_folder_button)
+        
         main_layout.addLayout(button_layout)
         
         # コピーボタン
@@ -273,6 +296,9 @@ class MainWindow(QMainWindow):
         
         # ステータス変更シグナルの接続
         self.status_changed.connect(self.update_status)
+        
+        # フォルダーを開くボタンのクリックイベント
+        self.open_folder_button.clicked.connect(self.open_temp_folder)
     
     def change_model(self, index):
         """モデルを変更する
@@ -509,6 +535,29 @@ class MainWindow(QMainWindow):
                 QMessageBox.information(self, "一時ファイル削除", "削除する一時ファイルはありませんでした")
         except Exception as e:
             QMessageBox.warning(self, "エラー", f"一時ファイルの削除に失敗しました: {str(e)}")
+    
+    def open_temp_folder(self):
+        """一時ファイルが保存されているフォルダーを開く"""
+        try:
+            temp_dir = self.recorder.temp_dir
+            
+            if not os.path.exists(temp_dir):
+                os.makedirs(temp_dir)
+                self.update_status("一時ファイルフォルダーが存在しないため作成しました")
+            
+            # OSによって適切なコマンドを使用
+            if os.name == 'nt':  # Windows
+                os.startfile(temp_dir)
+            elif os.name == 'posix':  # macOS, Linux
+                if os.uname().sysname == 'Darwin':  # macOS
+                    subprocess.run(['open', temp_dir])
+                else:  # Linux
+                    subprocess.run(['xdg-open', temp_dir])
+            
+            self.update_status(f"一時ファイルフォルダーを開きました: {temp_dir}")
+        except Exception as e:
+            QMessageBox.warning(self, "エラー", f"フォルダーを開けませんでした: {str(e)}")
+            self.update_status(f"フォルダーを開く際にエラーが発生しました: {str(e)}")
     
     @Slot(str)
     def update_status(self, message):
