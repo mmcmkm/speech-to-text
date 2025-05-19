@@ -50,6 +50,16 @@ class TranscriptionService:
             Make the text natural and coherent while preserving the speaker's intended message.
             Only return the processed transcription, nothing else.
             """
+        },
+        'casual': {
+            'name': '日常会話モード',
+            'description': 'ためらいやフィラーワードを削除しつつ、口語表現を許容します',
+            'prompt': """
+            This is an audio recording in Japanese. Please transcribe it in a casual conversational style.
+            Remove filler words and hesitations like 'えーと', 'あー', 'えっと', etc., but preserve colloquial expressions, slang, and informal wording typical in daily conversation.
+            Do not include any punctuation marks such as commas (、) or periods (。).
+            Only return the cleaned transcription in Japanese, nothing else.
+            """
         }
     }
 
@@ -58,7 +68,7 @@ class TranscriptionService:
 
         Args:
             model_name (str): 使用するモデルの名前
-            mode (str): 文字起こしモード（'clean', 'detailed', 'smart'）
+            mode (str): 文字起こしモード（'clean', 'detailed', 'smart', 'casual'）
         """
         self.logger = Logger.get_logger(__name__)
         
@@ -96,7 +106,7 @@ class TranscriptionService:
         """文字起こしモードを設定する
 
         Args:
-            mode (str): 文字起こしモード（'clean', 'detailed', 'smart'）
+            mode (str): 文字起こしモード（'clean', 'detailed', 'smart', 'casual'）
 
         Raises:
             ValueError: 指定されたモードが利用可能なモードリストに存在しない場合
