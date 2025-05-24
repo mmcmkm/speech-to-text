@@ -82,3 +82,6 @@ coverage.xml
 .Python
 *.manifest
 *.spec 
+test/
+data/templates/test_new_entries.csv
+data/dictionaries/default.json

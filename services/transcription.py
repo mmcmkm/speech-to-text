@@ -4,6 +4,7 @@ from google.genai import types
 import base64
 import logging
 from utils.logger import Logger
+from services.dictionary import DictionaryService
 
 class TranscriptionService:
     # 利用可能なモデルのリスト（無料枠対応）
@@ -83,6 +84,10 @@ class TranscriptionService:
         self.client = genai.Client(api_key=api_key)  # クライアントの初期化
         self.set_model(model_name)
         self.set_mode(mode)
+        
+        # 辞書サービスの初期化
+        self.dictionary_service = DictionaryService()
+        
         self.logger.info("Gemini APIの初期化が完了しました")
     
     def set_model(self, model_name):
@@ -178,7 +183,16 @@ class TranscriptionService:
         mime_type = "audio/wav"
         
         # 現在のモードに対応するプロンプトを取得
-        prompt = self.TRANSCRIPTION_MODES[self.mode]['prompt']
+        base_prompt = self.TRANSCRIPTION_MODES[self.mode]['prompt']
+        
+        # 辞書情報を含む拡張プロンプトを生成
+        dictionary_prompt = self.dictionary_service.generate_prompt_dictionary()
+        if dictionary_prompt:
+            prompt = dictionary_prompt + "\n" + base_prompt
+            self.logger.debug("辞書情報を含むプロンプトを使用します")
+        else:
+            prompt = base_prompt
+            
         self.logger.debug(f"プロンプト: {prompt}")
         
         # 音声データとプロンプトを送信
@@ -191,7 +205,7 @@ class TranscriptionService:
                     types.Part(
                         inline_data=types.Blob(
                             mime_type=mime_type,
-                            data=audio_base64
+                            data=audio_data
                         )
                     )
                 ]
@@ -216,6 +230,10 @@ class TranscriptionService:
             self.logger.info("文字起こしが正常に完了しました")
             # テキストのクリーンアップを実行
             cleaned_text = self.cleanup_text(model.text.strip())
+            
+            # 辞書エントリの使用回数を更新
+            self._update_dictionary_usage(cleaned_text)
+            
             return cleaned_text
         else:
             error_msg = "文字起こしに失敗しました。レスポンスが空です。"
@@ -249,4 +267,55 @@ class TranscriptionService:
         self.logger.debug(f"クリーンアップ後のテキスト: {cleaned_text}")
         self.logger.info("テキストのクリーンアップが完了しました")
         
-        return cleaned_text 
+        return cleaned_text
+    
+    def get_dictionary_service(self) -> DictionaryService:
+        """辞書サービスを取得する
+        
+        Returns:
+            DictionaryService: 辞書サービスのインスタンス
+        """
+        return self.dictionary_service
+    
+    def set_dictionary_enabled(self, enabled: bool):
+        """辞書機能の有効/無効を設定する
+        
+        Args:
+            enabled (bool): 有効にする場合はTrue、無効にする場合はFalse
+        """
+        self.dictionary_service.set_enabled(enabled)
+        self.logger.info(f"辞書機能を{'有効' if enabled else '無効'}にしました")
+    
+    def is_dictionary_enabled(self) -> bool:
+        """辞書機能が有効かどうかを確認する
+        
+        Returns:
+            bool: 有効な場合はTrue、無効な場合はFalse
+        """
+        return self.dictionary_service.is_enabled()
+    
+    def _update_dictionary_usage(self, transcribed_text: str):
+        """文字起こし結果に基づいて辞書エントリの使用回数を更新する
+        
+        Args:
+            transcribed_text (str): 文字起こしされたテキスト
+        """
+        if not self.dictionary_service.is_enabled():
+            return
+        
+        try:
+            # 全ての辞書エントリを取得
+            all_entries = self.dictionary_service.get_all_entries()
+            
+            # 文字起こし結果に含まれる表記をチェック
+            for entry in all_entries:
+                if entry.display in transcribed_text:
+                    # 使用回数を更新
+                    self.dictionary_service.update_entry_usage(entry.reading, entry.display)
+                    self.logger.debug(f"辞書エントリの使用回数を更新: {entry.reading} -> {entry.display}")
+            
+            # 使用実績が更新された場合は辞書を保存
+            self.dictionary_service.save_dictionary()
+            
+        except Exception as e:
+            self.logger.warning(f"辞書使用回数の更新中にエラーが発生しました: {str(e)}") 

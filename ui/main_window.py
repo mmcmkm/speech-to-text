@@ -2,7 +2,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QPushButton, QTextEdit, QLabel, QMessageBox, QApplication,
     QSpinBox, QDoubleSpinBox, QCheckBox, QGroupBox, QFormLayout, QProgressBar,
-    QComboBox, QStatusBar
+    QComboBox, QStatusBar, QDialog
 )
 from PySide6.QtCore import Qt, QTimer, Signal, Slot, QPoint, QSize
 from PySide6.QtGui import QIcon
@@ -11,6 +11,7 @@ import time
 import os
 import subprocess
 from utils.settings import Settings
+from utils.logger import Logger
 
 class MainWindow(QMainWindow):
     # シグナル定義
@@ -33,6 +34,7 @@ class MainWindow(QMainWindow):
         self.transcription_service = transcription_service
         self.clipboard_module = clipboard_module
         self.settings = Settings()
+        self.logger = Logger.get_logger(__name__)
         
         self.recording_thread = None
         self.transcription_thread = None
@@ -191,6 +193,11 @@ class MainWindow(QMainWindow):
         
         # ボタンレイアウト
         button_layout = QHBoxLayout()
+        
+        # 辞書管理ボタン
+        self.dictionary_button = QPushButton("辞書管理")
+        self.dictionary_button.clicked.connect(self.open_dictionary_window)
+        button_layout.addWidget(self.dictionary_button)
         
         # 録音ボタン
         self.record_button = QPushButton("録音開始")
@@ -566,4 +573,53 @@ class MainWindow(QMainWindow):
         Args:
             message (str): 表示するメッセージ
         """
-        self.status_bar.showMessage(message) 
+        self.status_bar.showMessage(message)
+    
+    def open_dictionary_window(self):
+        """辞書管理ウィンドウを開く"""
+        from ui.dictionary_window import DictionaryWindow
+        
+        dictionary_service = self.transcription_service.get_dictionary_service()
+        dialog = DictionaryWindow(dictionary_service, self)
+        
+        # 拡張機能を追加
+        self.add_enhanced_features_to_dictionary_window(dialog)
+        
+        dialog.exec()
+    
+    def add_enhanced_features_to_dictionary_window(self, dialog):
+        """辞書管理ウィンドウに拡張機能を追加"""
+        try:
+            # 高度な検索ボタンを追加
+            advanced_search_button = QPushButton("高度な検索")
+            advanced_search_button.clicked.connect(lambda: self.show_advanced_search(dialog))
+            
+            # ツールバーレイアウトを取得して追加
+            toolbar_layout = None
+            for child in dialog.findChildren(QHBoxLayout):
+                if child.parent() == dialog:
+                    toolbar_layout = child
+                    break
+            
+            if toolbar_layout:
+                toolbar_layout.addWidget(advanced_search_button)
+        except Exception as e:
+            self.logger.warning(f"拡張機能の追加中にエラーが発生しました: {str(e)}")
+    
+    def show_advanced_search(self, parent_window):
+        """高度な検索ダイアログを表示"""
+        try:
+            from ui.dictionary_window_enhanced import AdvancedSearchDialog, DictionaryWindowEnhanced
+            
+            dialog = AdvancedSearchDialog(parent_window.dictionary_service, parent_window)
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                params = dialog.get_search_params()
+                
+                # 高度な検索を実行
+                results = parent_window.dictionary_service.search_entries_advanced(**params)
+                
+                # 結果をテーブルに表示
+                DictionaryWindowEnhanced.display_search_results(parent_window, results)
+        except Exception as e:
+            self.logger.error(f"高度な検索中にエラーが発生しました: {str(e)}")
+            QMessageBox.warning(parent_window, "エラー", f"高度な検索中にエラーが発生しました:\n{str(e)}") 
