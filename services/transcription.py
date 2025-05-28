@@ -9,8 +9,7 @@ from services.dictionary import DictionaryService
 class TranscriptionService:
     # 利用可能なモデルのリスト（無料枠対応）
     AVAILABLE_MODELS = {
-        'gemini-2.5-pro-exp-03-25': '高精度な文字起こしに適した最新モデル（無料枠対応）',
-        'gemini-2.5-flash-preview-04-17': '高速な文字起こしに適した最新モデル',
+        'gemini-2.5-flash-preview-05-20': '高速な文字起こしに適した最新モデル',
         'gemini-2.0-flash': '高速な文字起こしに適した安定版モデル',
         'gemini-1.5-pro': '高精度な文字起こしに適した従来モデル',
         'gemini-1.5-flash': '高速な文字起こしに適した従来モデル',
@@ -64,7 +63,7 @@ class TranscriptionService:
         }
     }
 
-    def __init__(self, model_name='gemini-2.5-pro-exp-03-25', mode='clean'):
+    def __init__(self, model_name='gemini-2.0-flash', mode='clean'):
         """文字起こしサービスの初期化
 
         Args:

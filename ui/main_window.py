@@ -240,6 +240,27 @@ class MainWindow(QMainWindow):
         """)
         button_layout.addWidget(self.stop_button)
         
+        # キャンセルボタン
+        self.cancel_button = QPushButton("録音キャンセル")
+        self.cancel_button.setEnabled(False)
+        self.cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                border: none;
+                padding: 10px;
+                border-radius: 5px;
+                font-size: 14px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+            }
+        """)
+        button_layout.addWidget(self.cancel_button)
+        
         # クリアボタン
         self.clear_button = QPushButton("一時ファイルを削除")
         self.clear_button.setStyleSheet("""
@@ -287,6 +308,7 @@ class MainWindow(QMainWindow):
         """シグナルとスロットの接続を設定"""
         self.record_button.clicked.connect(self.start_recording)
         self.stop_button.clicked.connect(self.stop_recording)
+        self.cancel_button.clicked.connect(self.cancel_recording)
         self.copy_button.clicked.connect(self.copy_to_clipboard)
         self.model_combo.currentIndexChanged.connect(self.change_model)
         self.mode_combo.currentIndexChanged.connect(self.change_mode)
@@ -306,6 +328,9 @@ class MainWindow(QMainWindow):
         
         # フォルダーを開くボタンのクリックイベント
         self.open_folder_button.clicked.connect(self.open_temp_folder)
+        
+        # 一時ファイル削除ボタンのクリックイベント
+        self.clear_button.clicked.connect(self.clear_temp_files)
     
     def change_model(self, index):
         """モデルを変更する
@@ -361,7 +386,6 @@ class MainWindow(QMainWindow):
             self.is_recording = True
             self.recording_status_changed.emit(True)
             self.status_changed.emit("録音中...")
-            self.record_button.setText("録音停止")
             self.recording_thread = threading.Thread(target=self.recording_worker)
             self.recording_thread.start()
     
@@ -371,7 +395,6 @@ class MainWindow(QMainWindow):
             self.is_recording = False
             self.recording_status_changed.emit(False)
             self.status_changed.emit("処理中...")
-            self.record_button.setText("録音開始")
             self.progress_bar.setVisible(True)
             self.progress_bar.setRange(0, 0)  # インディケーターモード
             
@@ -387,6 +410,27 @@ class MainWindow(QMainWindow):
             except Exception as e:
                 self.status_changed.emit(f"エラー: {str(e)}")
                 self.progress_bar.setVisible(False)
+    
+    def cancel_recording(self):
+        """録音をキャンセル（文字起こし処理を行わない）"""
+        if self.is_recording:
+            self.is_recording = False
+            self.recording_status_changed.emit(False)
+            self.status_changed.emit("録音をキャンセルしました")
+            
+            # 録音を停止するが文字起こし処理は行わない
+            try:
+                audio_file = self.recorder.stop_recording()
+                if audio_file:
+                    # 音声ファイルを削除
+                    import os
+                    if os.path.exists(audio_file):
+                        os.remove(audio_file)
+                        self.logger.info(f"キャンセルされた録音ファイルを削除しました: {audio_file}")
+                self.status_changed.emit("準備完了")
+            except Exception as e:
+                self.logger.error(f"録音キャンセル中にエラーが発生しました: {str(e)}")
+                self.status_changed.emit(f"エラー: {str(e)}")
     
     def recording_worker(self):
         """録音ワーカースレッド"""
@@ -492,6 +536,7 @@ class MainWindow(QMainWindow):
         self.is_recording = is_recording
         self.record_button.setEnabled(not is_recording)
         self.stop_button.setEnabled(is_recording)
+        self.cancel_button.setEnabled(is_recording)
         self.copy_button.setEnabled(False)
         
         if is_recording:
@@ -515,8 +560,8 @@ class MainWindow(QMainWindow):
         """ウィンドウを閉じる際の処理"""
         # 録音中なら停止
         if self.is_recording:
-            self.recorder.stop_recording()
-            self.is_recording = False
+            # キャンセル処理を実行（文字起こしを行わない）
+            self.cancel_recording()
         
         # 無音検出タイマーを停止
         self.silence_timer.stop()
